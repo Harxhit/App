@@ -45,24 +45,12 @@ jobs:
       - name: Update seen.json
         run: cp current_clean.json seen.json
 
-      - name: Notify - Email
-        if: steps.diff.outputs.count != '0'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: 'New help-wanted issue on Expensify/App'
-          to: harxhit13@gmail.com
-          from: Issue Watcher
-          body: file://new_issues.json
-
-      - name: Notify - Push (ntfy.sh)
+      - name: Notify - ntfy.sh
         if: steps.diff.outputs.count != '0'
         run: |
-          MSG=$(jq -r '.[] | "\(.title) - \(.url)"' new_issues.json)
-          curl -d "$MSG" ntfy.sh/harshit-expensify-watch
+          jq -r '.[] | "\(.title) - \(.url)"' new_issues.json | while read issue; do
+            curl -d "$issue" ntfy.sh/harshit-expensify-watch
+          done
 
       - name: Save cache
         uses: actions/cache/save@v4
