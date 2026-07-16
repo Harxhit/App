@@ -1,0 +1,71 @@
+name: Watch Expensify help-wanted issues
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # every 15 min
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore seen issues cache
+        uses: actions/cache@v4
+        with:
+          path: seen.json
+          key: seen-issues-${{ github.run_id }}
+          restore-keys: seen-issues-
+
+      - name: Init seen.json if missing
+        run: '[ -f seen.json ] || echo "[]" > seen.json'
+
+      - name: Fetch help-wanted issues and diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/search/issues?q=repo:Expensify/App+label:%22Help+Wanted%22+state:open&per_page=100" \
+            -o current.json
+
+          jq '[.items[] | {number, title, url: .html_url}]' current.json > current_clean.json
+
+          # numbers already seen
+          jq -r '.[].number' seen.json > seen_numbers.txt || touch seen_numbers.txt
+
+          # new ones only
+          jq -c --slurpfile seen_nums <(jq -R 'tonumber' seen_numbers.txt | jq -s .) \
+            '[.[] | select(.number as $n | ($seen_nums[0] // []) | index($n) | not)]' \
+            current_clean.json > new_issues.json
+
+          echo "count=$(jq length new_issues.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Update seen.json
+        run: cp current_clean.json seen.json
+
+      - name: Notify - Email
+        if: steps.diff.outputs.count != '0'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: 'New help-wanted issue on Expensify/App'
+          to: harxhit13@gmail.com
+          from: Issue Watcher
+          body: file://new_issues.json
+
+      - name: Notify - Push (ntfy.sh)
+        if: steps.diff.outputs.count != '0'
+        run: |
+          MSG=$(jq -r '.[] | "\(.title) - \(.url)"' new_issues.json)
+          curl -d "$MSG" ntfy.sh/harshit-expensify-watch
+
+      - name: Save cache
+        uses: actions/cache/save@v4
+        with:
+          path: seen.json
+          key: seen-issues-${{ github.run_id }}
